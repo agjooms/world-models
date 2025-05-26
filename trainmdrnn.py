@@ -93,7 +93,7 @@ def to_latent(obs, next_obs):
     """
     with torch.no_grad():
         obs, next_obs = [
-            f.upsample(x.view(-1, 3, SIZE, SIZE), size=RED_SIZE,
+            f.interpolate(x.view(-1, 3, SIZE, SIZE), size=RED_SIZE,
                        mode='bilinear', align_corners=True)
             for x in (obs, next_obs)]
 

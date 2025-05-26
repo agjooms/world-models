@@ -150,7 +150,7 @@ cur_best = None
 ctrl_file = join(ctrl_dir, 'best.tar')
 print("Attempting to load previous best...")
 if exists(ctrl_file):
-    state = torch.load(ctrl_file, map_location={'cuda:0': 'cpu'})
+    state = torch.load(ctrl_file, map_location={'cuda:0': 'cpu'}, weights_only=False)
     cur_best = - state['reward']
     controller.load_state_dict(state['state_dict'])
     print("Previous best was {}...".format(-cur_best))

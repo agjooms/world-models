@@ -5,8 +5,9 @@ import torch
 from torchvision import transforms
 import numpy as np
 from models import MDRNNCell, VAE, Controller
-import gym
-import gym.envs.box2d
+import gymnasium as gym
+import gymnasium.envs.box2d
+import imageio
 
 # A bit dirty: manually change size of car racing env
 gym.envs.box2d.car_racing.STATE_W, gym.envs.box2d.car_racing.STATE_H = 64, 64
@@ -132,12 +133,15 @@ class RolloutGenerator(object):
 
         # load controller if it was previously saved
         if exists(ctrl_file):
-            ctrl_state = torch.load(ctrl_file, map_location={'cuda:0': str(device)})
+            ctrl_state = torch.load(ctrl_file, map_location={'cuda:0': str(device)}, weights_only=False)
             print("Loading Controller with reward {}".format(
                 ctrl_state['reward']))
             self.controller.load_state_dict(ctrl_state['state_dict'])
 
-        self.env = gym.make('CarRacing-v0')
+        self.env = gym.make('CarRacing-v3') # For training
+        # self.env = gym.make('CarRacing-v3', render_mode="human") # For testing
+        # self.env = gym.make('CarRacing-v3', render_mode='rgb_array') # For rendering
+
         self.device = device
 
         self.time_limit = time_limit
@@ -161,7 +165,7 @@ class RolloutGenerator(object):
         _, _, _, _, _, next_hidden = self.mdrnn(action, latent_mu, hidden)
         return action.squeeze().cpu().numpy(), next_hidden
 
-    def rollout(self, params, render=False):
+    def rollout(self, params, render=False, save_video=False, video_path=None):
         """ Execute a rollout and returns minus cumulative reward.
 
         Load :params: into the controller and execute a single rollout. This
@@ -171,14 +175,23 @@ class RolloutGenerator(object):
 
         :returns: minus cumulative reward
         """
+
+        frames = [] if save_video else None
+
         # copy params into the controller
         if params is not None:
             load_parameters(params, self.controller)
 
         obs = self.env.reset()
 
+        # New gymnasium return tuple
+        if isinstance(obs, tuple):
+            obs = obs[0]
+
         # This first render is required !
-        self.env.render()
+        frame = self.env.render() if (render or save_video) else None
+        if save_video and frame is not None:
+            frames.append(frame)
 
         hidden = [
             torch.zeros(1, RSIZE).to(self.device)
@@ -186,15 +199,41 @@ class RolloutGenerator(object):
 
         cumulative = 0
         i = 0
-        while True:
-            obs = transform(obs).unsqueeze(0).to(self.device)
-            action, hidden = self.get_action_and_transition(obs, hidden)
-            obs, reward, done, _ = self.env.step(action)
 
-            if render:
-                self.env.render()
+        # New for gymnasium API
+        while True:
+            obs_t = obs
+            if isinstance(obs, tuple):
+                obs = obs[0]
+            obs_t = transform(obs_t).unsqueeze(0).to(self.device)
+            action, hidden = self.get_action_and_transition(obs_t, hidden)
+            step_result = self.env.step(action)
+            if len(step_result) == 5:
+                obs, reward, terminated, truncated, _ = step_result
+                done = terminated or truncated
+            else:
+                obs, reward, done, _ = step_result
+
+            frame = self.env.render() if (render or save_video) else None
+            if save_video and frame is not None:
+                frames.append(frame)
 
             cumulative += reward
             if done or i > self.time_limit:
+                if save_video and frames:
+                    import imageio
+                    # Use the actual reward in the filename
+                    reward_str = f"{cumulative:.2f}"
+                    final_video_path = video_path
+                    if final_video_path is None:
+                        final_video_path = f"videos/controller_rollout_reward_{reward_str}.mp4"
+                    else:
+                        base, ext = os.path.splitext(video_path)
+                        import os
+                        # Always save in videos/ even if a path is given
+                        base = os.path.join("videos", os.path.basename(base))
+                        final_video_path = f"{base}_reward_{reward_str}{ext}"
+                    imageio.mimsave(final_video_path, frames, fps=30)
+                    print(f"Saved video to {final_video_path}")
                 return - cumulative
             i += 1

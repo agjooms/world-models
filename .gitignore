@@ -7,3 +7,6 @@ Dockerfile
 frames/
 dock_config.json
 .mypy_cache
+
+exp_dir
+videos
