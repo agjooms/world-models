@@ -13,35 +13,32 @@ from torchvision.utils import save_image
 from models.vae import VAE
 
 from utils.misc import save_checkpoint
-from utils.misc import LSIZE, RED_SIZE
+from utils.config import LSIZE, RED_SIZE
 ## WARNING : THIS SHOULD BE REPLACE WITH PYTORCH 0.5
 from utils.learning import EarlyStopping
 from utils.learning import ReduceLROnPlateau
 from data.loaders import RolloutObservationDataset
 
+# Parse arguments
 parser = argparse.ArgumentParser(description='VAE Trainer')
 parser.add_argument('--batch-size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 32)')
-parser.add_argument('--epochs', type=int, default=1000, metavar='N',
-                    help='number of epochs to train (default: 1000)')
+parser.add_argument('--epochs', type=int, default=50, metavar='N',
+                    help='number of epochs to train (default: 50)')
 parser.add_argument('--logdir', type=str, help='Directory where results are logged')
 parser.add_argument('--noreload', action='store_true',
                     help='Best model is not reloaded if specified')
 parser.add_argument('--nosamples', action='store_true',
                     help='Does not save samples during training if specified')
-
-
 args = parser.parse_args()
+
+# Device configuration
 cuda = torch.cuda.is_available()
-
-
 torch.manual_seed(123)
-# Fix numeric divergence due to bug in Cudnn
-torch.backends.cudnn.benchmark = True
-
+torch.backends.cudnn.benchmark = True # Fix numeric divergence due to bug in Cudnn
 device = torch.device("cuda" if cuda else "cpu")
 
-
+# Transforms: prepare observations for VAE
 transform_train = transforms.Compose([
     transforms.ToPILImage(),
     transforms.Resize((RED_SIZE, RED_SIZE)),
@@ -55,6 +52,7 @@ transform_test = transforms.Compose([
     transforms.ToTensor(),
 ])
 
+# Data loading
 dataset_train = RolloutObservationDataset('datasets/carracing',
                                           transform_train, train=True)
 dataset_test = RolloutObservationDataset('datasets/carracing',
@@ -64,13 +62,13 @@ train_loader = torch.utils.data.DataLoader(
 test_loader = torch.utils.data.DataLoader(
     dataset_test, batch_size=args.batch_size, shuffle=True, num_workers=2)
 
-
+# Model & Optimizer setup
 model = VAE(3, LSIZE).to(device)
 optimizer = optim.Adam(model.parameters())
 scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=5)
 earlystopping = EarlyStopping('min', patience=30)
 
-# Reconstruction + KL divergence losses summed over all elements and batch
+# VAE loss: Reconstruction + KL divergence losses summed over all elements and batch
 def loss_function(recon_x, x, mu, logsigma):
     """ VAE loss function """
     BCE = F.mse_loss(recon_x, x, size_average=False)
@@ -82,7 +80,7 @@ def loss_function(recon_x, x, mu, logsigma):
     KLD = -0.5 * torch.sum(1 + 2 * logsigma - mu.pow(2) - (2 * logsigma).exp())
     return BCE + KLD
 
-
+# Training function
 def train(epoch):
     """ One training epoch """
     model.train()
@@ -105,7 +103,7 @@ def train(epoch):
     print('====> Epoch: {} Average loss: {:.4f}'.format(
         epoch, train_loss / len(train_loader.dataset)))
 
-
+# Test function
 def test():
     """ One test epoch """
     model.eval()
@@ -121,12 +119,13 @@ def test():
     print('====> Test set loss: {:.4f}'.format(test_loss))
     return test_loss
 
-# check vae dir exists, if not, create it
+# Check if logdir exists
 vae_dir = join(args.logdir, 'vae')
 if not exists(vae_dir):
     mkdir(vae_dir)
     mkdir(join(vae_dir, 'samples'))
 
+# Reloading
 reload_file = join(vae_dir, 'best.tar')
 if not args.noreload and exists(reload_file):
     state = torch.load(reload_file)
@@ -139,22 +138,21 @@ if not args.noreload and exists(reload_file):
     scheduler.load_state_dict(state['scheduler'])
     earlystopping.load_state_dict(state['earlystopping'])
 
-
+# Training loop
 cur_best = None
-
 for epoch in range(1, args.epochs + 1):
     train(epoch)
     test_loss = test()
     scheduler.step(test_loss)
     earlystopping.step(test_loss)
 
-    # checkpointing
+    # Checkpointing
     best_filename = join(vae_dir, 'best.tar')
     filename = join(vae_dir, 'checkpoint.tar')
     is_best = not cur_best or test_loss < cur_best
     if is_best:
         cur_best = test_loss
-
+    
     save_checkpoint({
         'epoch': epoch,
         'state_dict': model.state_dict(),
@@ -165,7 +163,7 @@ for epoch in range(1, args.epochs + 1):
     }, is_best, filename, best_filename)
 
 
-
+    # Save samples
     if not args.nosamples:
         with torch.no_grad():
             sample = torch.randn(RED_SIZE, LSIZE).to(device)

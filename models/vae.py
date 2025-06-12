@@ -22,11 +22,11 @@ class Decoder(nn.Module):
 
     def forward(self, x): # pylint: disable=arguments-differ
         x = F.relu(self.fc1(x))
-        x = x.unsqueeze(-1).unsqueeze(-1)
+        x = x.unsqueeze(-1).unsqueeze(-1) # Reshape to (batch_size, 1024, 1, 1)
         x = F.relu(self.deconv1(x))
         x = F.relu(self.deconv2(x))
         x = F.relu(self.deconv3(x))
-        reconstruction = F.sigmoid(self.deconv4(x))
+        reconstruction = F.sigmoid(self.deconv4(x)) # Sigmoid to ensure output is in [0, 1] range
         return reconstruction
 
 class Encoder(nn.Module): # pylint: disable=too-many-instance-attributes
@@ -50,14 +50,15 @@ class Encoder(nn.Module): # pylint: disable=too-many-instance-attributes
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
-        x = F.relu(self.conv4(x))
-        x = x.view(x.size(0), -1)
+        x = F.relu(self.conv4(x)) # Output shape: (batch_size, 256, 2, 2)
+        x = x.view(x.size(0), -1) # Flatten to (batch_size, 2*2*256=1024)
 
         mu = self.fc_mu(x)
         logsigma = self.fc_logsigma(x)
 
         return mu, logsigma
 
+# Complet Variational Autoencoder (VAE)
 class VAE(nn.Module):
     """ Variational Autoencoder """
     def __init__(self, img_channels, latent_size):

@@ -45,6 +45,7 @@ def gmm_loss(batch, mus, sigmas, logpi, reduce=True): # pylint: disable=too-many
         return - torch.mean(log_prob)
     return - log_prob
 
+# Base class for MDRNN and MDRNNCell
 class _MDRNNBase(nn.Module):
     def __init__(self, latents, actions, hiddens, gaussians):
         super().__init__()
@@ -53,6 +54,7 @@ class _MDRNNBase(nn.Module):
         self.hiddens = hiddens
         self.gaussians = gaussians
 
+        # Linear layer that maps hstate to gmm parameters
         self.gmm_linear = nn.Linear(
             hiddens, (2 * latents + 1) * gaussians + 2)
 
@@ -61,7 +63,7 @@ class _MDRNNBase(nn.Module):
 
 class MDRNN(_MDRNNBase):
     """ MDRNN model for multi steps forward """
-    def __init__(self, latents, actions, hiddens, gaussians):
+    def __init__(self, latents, actions, hiddens, gaussians): # 5 is used for gaussians
         super().__init__(latents, actions, hiddens, gaussians)
         self.rnn = nn.LSTM(latents + actions, hiddens)
 

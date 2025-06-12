@@ -10,7 +10,7 @@ from torchvision import transforms
 import numpy as np
 from tqdm import tqdm
 from utils.misc import save_checkpoint
-from utils.misc import ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE
+from utils.config import ASIZE, LSIZE, RSIZE, RED_SIZE, SIZE
 from utils.learning import EarlyStopping
 ## WARNING : THIS SHOULD BE REPLACED WITH PYTORCH 0.5
 from utils.learning import ReduceLROnPlateau
@@ -19,6 +19,7 @@ from data.loaders import RolloutSequenceDataset
 from models.vae import VAE
 from models.mdrnn import MDRNN, gmm_loss
 
+# Parse arguments
 parser = argparse.ArgumentParser("MDRNN training")
 parser.add_argument('--logdir', type=str,
                     help="Where things are logged and models are loaded from.")
@@ -28,9 +29,10 @@ parser.add_argument('--include_reward', action='store_true',
                     help="Add a reward modelisation term to the loss.")
 args = parser.parse_args()
 
+# Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# constants
+# Constants
 BSIZE = 16
 SEQ_LEN = 32
 epochs = 30
@@ -42,24 +44,21 @@ state = torch.load(vae_file)
 print("Loading VAE at epoch {} "
       "with test error {}".format(
           state['epoch'], state['precision']))
-
 vae = VAE(3, LSIZE).to(device)
 vae.load_state_dict(state['state_dict'])
 
-# Loading model
+# Initialize MDRNN model and optimizer
 rnn_dir = join(args.logdir, 'mdrnn')
 rnn_file = join(rnn_dir, 'best.tar')
-
 if not exists(rnn_dir):
     mkdir(rnn_dir)
-
 mdrnn = MDRNN(LSIZE, ASIZE, RSIZE, 5)
 mdrnn.to(device)
 optimizer = torch.optim.RMSprop(mdrnn.parameters(), lr=1e-3, alpha=.9)
 scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=5)
 earlystopping = EarlyStopping('min', patience=30)
 
-
+# Reloading
 if exists(rnn_file) and not args.noreload:
     rnn_state = torch.load(rnn_file)
     print("Loading MDRNN at epoch {} "
@@ -70,8 +69,7 @@ if exists(rnn_file) and not args.noreload:
     scheduler.load_state_dict(state['scheduler'])
     earlystopping.load_state_dict(state['earlystopping'])
 
-
-# Data Loading
+# Data Loading & Transforms
 transform = transforms.Lambda(
     lambda x: np.transpose(x, (0, 3, 1, 2)) / 255)
 train_loader = DataLoader(
@@ -81,6 +79,7 @@ test_loader = DataLoader(
     RolloutSequenceDataset('datasets/carracing', SEQ_LEN, transform, train=False, buffer_size=10),
     batch_size=BSIZE, num_workers=8)
 
+# Function to transform observations to latent space
 def to_latent(obs, next_obs):
     """ Transform observations to latent space.
 
@@ -92,6 +91,7 @@ def to_latent(obs, next_obs):
         - next_latent_obs: 4D torch tensor (BSIZE, SEQ_LEN, LSIZE)
     """
     with torch.no_grad():
+        batch, seq = obs.shape[0], obs.shape[1] # NEW: Get batch size and sequence length
         obs, next_obs = [
             f.interpolate(x.view(-1, 3, SIZE, SIZE), size=RED_SIZE,
                        mode='bilinear', align_corners=True)
@@ -101,11 +101,12 @@ def to_latent(obs, next_obs):
             vae(x)[1:] for x in (obs, next_obs)]
 
         latent_obs, latent_next_obs = [
-            (x_mu + x_logsigma.exp() * torch.randn_like(x_mu)).view(BSIZE, SEQ_LEN, LSIZE)
+            (x_mu + x_logsigma.exp() * torch.randn_like(x_mu)).view(batch, seq, LSIZE) # Change (BSIZE, SEQ_LEN, LSIZE) to (batch, seq, LSIZE)
             for x_mu, x_logsigma in
             [(obs_mu, obs_logsigma), (next_obs_mu, next_obs_logsigma)]]
     return latent_obs, latent_next_obs
 
+# Function to compute losses
 def get_loss(latent_obs, action, reward, terminal,
              latent_next_obs, include_reward: bool):
     """ Compute losses.
@@ -143,7 +144,7 @@ def get_loss(latent_obs, action, reward, terminal,
     loss = (gmm + bce + mse) / scale
     return dict(gmm=gmm, bce=bce, mse=mse, loss=loss)
 
-
+# Training and testing functions
 def data_pass(epoch, train, include_reward): # pylint: disable=too-many-locals
     """ One pass through the data """
     if train:
@@ -194,9 +195,9 @@ def data_pass(epoch, train, include_reward): # pylint: disable=too-many-locals
     return cum_loss * BSIZE / len(loader.dataset)
 
 
+# Training loop
 train = partial(data_pass, train=True, include_reward=args.include_reward)
 test = partial(data_pass, train=False, include_reward=args.include_reward)
-
 cur_best = None
 for e in range(epochs):
     train(e)

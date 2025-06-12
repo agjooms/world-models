@@ -1,7 +1,7 @@
 """ Test controller """
 import argparse
 from os.path import join, exists
-from utils.misc import RolloutGenerator
+from utils.misc import RolloutGenerator, RolloutGenerator2, RolloutGenerator3
 import torch
 
 parser = argparse.ArgumentParser()
@@ -15,7 +15,9 @@ assert exists(ctrl_file),\
 
 device = torch.device('cpu')
 
-generator = RolloutGenerator(args.logdir, device, 1000)
+# generator = RolloutGenerator(args.logdir, device, 1000)
+# generator = RolloutGenerator2(args.logdir, device, 1000) # New
+generator = RolloutGenerator3(args.logdir, device, 1000)
 
 with torch.no_grad():
     generator.rollout(None, save_video=True)

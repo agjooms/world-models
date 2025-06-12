@@ -17,10 +17,12 @@ parser.add_argument('--policy', type=str, choices=['brown', 'white'],
                     default='brown')
 args = parser.parse_args()
 
+
+# Calculate rollouts per thread (rpt)
 rpt = args.rollouts // args.threads + 1
 
 def _threaded_generation(i):
-    tdir = join(args.rootdir, 'thread_{}'.format(i))
+    tdir = join(args.rootdir, 'thread_{}'.format(i)) # Directory per thread
     makedirs(tdir, exist_ok=True)
     cmd = ['xvfb-run', '-s', '"-screen 0 1400x900x24"']
     cmd += ['--server-num={}'.format(i + 1)]

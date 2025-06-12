@@ -16,9 +16,10 @@ import cma
 from models import Controller
 from tqdm import tqdm
 import numpy as np
-from utils.misc import RolloutGenerator, ASIZE, RSIZE, LSIZE
+from utils.misc import RolloutGenerator, RolloutGenerator2, RolloutGenerator3
 from utils.misc import load_parameters
 from utils.misc import flatten_parameters
+from utils.config import ASIZE, RSIZE, LSIZE
 
 # parsing
 parser = argparse.ArgumentParser()
@@ -31,7 +32,8 @@ parser.add_argument('--target-return', type=float, help='Stops once the return '
 parser.add_argument('--display', action='store_true', help="Use progress bars if "
                     "specified.")
 parser.add_argument('--max-workers', type=int, help='Maximum number of workers.',
-                    default=32)
+                    default=6)
+parser.add_argument('--smoothness-weight', type=float, default=10, help='Weight for smoothness penalty.') # New argument
 args = parser.parse_args()
 
 # Max number of workers. M
@@ -90,7 +92,9 @@ def slave_routine(p_queue, r_queue, e_queue, p_index):
     sys.stderr = open(join(tmp_dir, str(getpid()) + '.err'), 'a')
 
     with torch.no_grad():
-        r_gen = RolloutGenerator(args.logdir, device, time_limit)
+        # r_gen = RolloutGenerator(args.logdir, device, time_limit)
+        # r_gen = RolloutGenerator2(args.logdir, device, time_limit, smoothness_weight=args.smoothness_weight) # Changed
+        r_gen = RolloutGenerator3(args.logdir, device, time_limit)
 
         while e_queue.empty():
             if p_queue.empty():
@@ -143,6 +147,16 @@ def evaluate(solutions, results, rollouts=100):
 ################################################################################
 #                           Launch CMA                                         #
 ################################################################################
+
+# Initialize reward logging
+import pandas as pd
+reward_history = []
+reward_history_file = join(ctrl_dir, 'reward_history.csv')
+if exists(reward_history_file):
+    df = pd.read_csv(reward_history_file)
+    reward_history = df.values.tolist()
+    print("Loaded reward history from {} with {} epochs...".format(reward_history_file, len(reward_history)))
+
 controller = Controller(LSIZE, RSIZE, ASIZE)  # dummy instance
 
 # define current best and load parameters
@@ -190,6 +204,19 @@ while not es.stop():
     es.tell(solutions, r_list)
     es.disp()
 
+    # Log rewards for this epoch
+    rewards = - np.array(r_list)
+    mean_reward = np.mean(rewards)
+    std_reward = np.std(rewards)
+    best_reward = np.max(rewards)
+    worst_reward = np.min(rewards)
+    reward_history.append((mean_reward, std_reward, best_reward, worst_reward))
+    print("Epoch {}: Mean reward = {:.2f} +- std = {:.2f}, Best = {:.2f}, Worst = {:.2f}".format(
+        epoch+1, mean_reward, std_reward, best_reward, worst_reward))
+    df = pd.DataFrame(reward_history, columns=['mean_reward', 'std_reward', 'best_reward', 'worst_reward'])
+    df.to_csv(reward_history_file, index=False)
+    print("Saved reward history to {}...".format(reward_history_file))
+
     # evaluation and saving
     if epoch % log_step == log_step - 1:
         best_params, best, std_best = evaluate(solutions, r_list)
@@ -201,6 +228,7 @@ while not es.stop():
             torch.save(
                 {'epoch': epoch,
                  'reward': - cur_best,
+                 'std': std_best,
                  'state_dict': controller.state_dict()},
                 join(ctrl_dir, 'best.tar'))
         if - best > args.target_return:
@@ -212,3 +240,5 @@ while not es.stop():
 
 es.result_pretty()
 e_queue.put('EOP')
+
+# python traincontroller.py --logdir exp_dir --n-samples 16 --pop-size 8 --target-return 950 --display --max-workers 8
