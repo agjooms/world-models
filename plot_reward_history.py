@@ -25,12 +25,13 @@ def plot_reward_history(logdir):
     worst_reward = df['worst_reward'].values
 
     plt.figure(figsize=(10, 5))
-    plt.plot(generations, mean_reward, color='b')
-    plt.plot(generations, best_reward, color='g')
-    plt.plot(generations, worst_reward, color='r')
+    plt.plot(generations, mean_reward, color='b', label='Mean Population Reward')
+    plt.plot(generations, best_reward, color='g', label='Best Reward')
+    plt.plot(generations, worst_reward, color='r', label='Worst Reward')
     plt.title('Reward History')
     plt.xlabel('Generation')
     plt.ylabel('Reward')
+    plt.legend()
     plt.grid()
     plt.show()
 
@@ -62,6 +63,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logdir = args.logdir  # assuming models are in logdir
-
-    print_best_model_stats(logdir)
     plot_reward_history(logdir)
+    print_best_model_stats(logdir)
